@@ -107,6 +107,53 @@ h1{
   filter:drop-shadow(0 2px 10px rgba(56,189,248,0.35));
 }
 
+.header-right{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.scroll-toggle-btn{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  background:rgba(56,189,248,0.12);
+  border:1px solid rgba(56,189,248,0.38);
+  clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%);
+  padding:6px 14px;
+  color:var(--blue-base);
+  font-family:'Oxanium',sans-serif;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:1.2px;
+  cursor:pointer;
+  outline:none;
+  transition:all .25s ease;
+  user-select:none;
+}
+.scroll-toggle-btn:hover{
+  background:rgba(56,189,248,0.22);
+  border-color:rgba(56,189,248,0.7);
+  box-shadow:0 0 12px rgba(56,189,248,0.35);
+}
+.scroll-toggle-btn.paused{
+  background:rgba(239,68,68,0.14);
+  border-color:rgba(239,68,68,0.5);
+  color:#f87171;
+}
+.scroll-dot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:var(--blue-base);
+  box-shadow:0 0 8px var(--blue-base);
+  transition:all .25s ease;
+}
+.scroll-toggle-btn.paused .scroll-dot{
+  background:#f87171;
+  box-shadow:0 0 8px #f87171;
+}
+
 .live{
   display:flex;
   align-items:center;
@@ -189,7 +236,7 @@ h1{
 
 .cols{
   display:grid;
-  grid-template-columns:46px minmax(0,1fr) 100px 95px;
+  grid-template-columns:46px minmax(0,1fr) 105px 95px;
   gap:10px;
   padding:6px 12px;
   color:#64748b;
@@ -232,7 +279,7 @@ h1{
 .entry{
   position:relative;
   display:grid;
-  grid-template-columns:46px minmax(0,1fr) 100px 95px;
+  grid-template-columns:46px minmax(0,1fr) 105px 95px;
   gap:10px;
   align-items:center;
   min-height:52px;
@@ -418,168 +465,160 @@ footer{
       <h1>LEADERBOARD KUALIFIKASI</h1>
     </div>
   </div>
-  <div class="live"><span class="dot"></span> LIVE</div>
+  <div class="header-right">
+    <button id="scrollToggle" class="scroll-toggle-btn" title="Klik atau tekan tombol 'S' untuk ON/OFF Auto Scroll (Sesi Juara)">
+      <span class="scroll-dot"></span>
+      <span id="scrollToggleText">SCROLL: ON</span>
+    </button>
+    <div class="live"><span class="dot"></span> LIVE</div>
+  </div>
 </header>
 <div id="groups"><div class="empty">Hubungkan Google Sheets untuk menampilkan peringkat.</div></div>
 <footer><span id="status">MENUNGGU DATA</span><span id="updated">AUTO UPDATE • 5 DETIK</span></footer></section>
 <script>
 // =========================================================================
-// 📌 [TEMPAT GANTI URL GOOGLE SHEETS DI BAWAH INI]
+// 📌 [PENGATURAN GOOGLE SHEETS KUALIFIKASI]
 // =========================================================================
-// Panduan:
-// 1. Di Google Sheets, klik tombol Bagikan (Share) di kanan atas.
-// 2. Ubah akses menjadi: "Siapa saja yang memiliki link" -> Pelihat (Viewer).
-// 3. Salin link browser Anda (atau link gviz/pub) dan tempel di dalam tanda kutip "":
-// =========================================================================
-const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1_o_bfA7I1VGTlx76ViVOge9bXzvTZhVCeOg-MXnT7Jo/gviz/tq?tqx=out:csv";
-// =========================================================================
+const SHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/1TMTYwdEk3BFC8sejhZrJzS1lZxJ58Y1KhJRwTz4_o6o";
+const SHEET_LOWER_NAME = "Lower Kualifikasi";
+const SHEET_UPPER_NAME = "Upper Kualifikasi";
 
 // Interval refresh otomatis (5000 = 5 detik)
 const REFRESH_MS = 5000;
 
-// Batas maksimal tim yang ditampilkan per kelas
-const MAX_TEAMS_PER_CLASS = 20;
+// Batas maksimal tim yang ditampilkan per kelas (akan otomatis scroll jika > 5 tim)
+const MAX_TEAMS_PER_CLASS = 50;
 const groupsEl=document.getElementById("groups"),statusEl=document.getElementById("status"),updatedEl=document.getElementById("updated");
 let lastSignature="";
+
 function parseCSV(text){const out=[];let row=[],cell="",quoted=false;for(let i=0;i<text.length;i++){const c=text[i],n=text[i+1];if(c==='"'&&quoted&&n==='"'){cell+='"';i++}else if(c==='"')quoted=!quoted;else if(c===','&&!quoted){row.push(cell);cell=""}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&n==='\n')i++;row.push(cell);if(row.some(v=>v.trim()!==""))out.push(row);row=[];cell=""}else cell+=c}row.push(cell);if(row.some(v=>v.trim()!==""))out.push(row);return out}
 function norm(s){return String(s||"").trim().toLowerCase()}
+
+// Parse Sisa Waktu menjadi detik (semakin besar detiknya, semakin baik peringkatnya)
 function parseTimeToSeconds(t){
-  if(!t) return Infinity;
+  if(!t) return 0;
   const s = String(t).trim();
-  if(!s || s === "-" || s === "—") return Infinity;
+  if(!s || s === "-" || s === "—") return 0;
   const parts = s.replace(".", ":").split(":").map(Number);
-  if(parts.some(isNaN)) return Infinity;
+  if(parts.some(isNaN)){
+    const num = Number(s);
+    return isNaN(num) ? 0 : num;
+  }
   if(parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if(parts.length === 2) return parts[0] * 3600 + parts[1] * 60;
-  return Infinity;
+  if(parts.length === 2) return parts[0] * 60 + parts[1];
+  if(parts.length === 1) return parts[0];
+  return 0;
 }
-function parseData(csv){
-  const m = parseCSV(csv.replace(/^\uFEFF/,""));
+
+function findCol(header, patterns){
+  for(const p of patterns){
+    const idx = header.findIndex(c => c.includes(p) && !c.includes("bonus") && !c.includes("misi"));
+    if(idx !== -1) return idx;
+  }
+  return -1;
+}
+
+function parseSheetData(csvText, clsKey){
+  const m = parseCSV(csvText.replace(/^\uFEFF/,""));
   if (m.length < 2) return [];
 
-  let headerRowIdx = 0;
-  let headerRow = m[0].map(norm);
-  const isColHeaderRow = row => row.some(c => ["nama tim", "tim", "nama", "nilai", "skor", "score"].some(t => c.includes(t)));
-  if (!isColHeaderRow(headerRow) && m.length > 2 && isColHeaderRow(m[1].map(norm))) {
-    headerRowIdx = 1;
-    headerRow = m[1].map(norm);
-  }
-
-  const isClsCol = s => ["kelas", "class", "kategori", "kelas pertandingan"].some(t => s === t);
-  const isNameCol = s => ["nama tim", "tim", "team", "nama", "peserta"].some(t => s.includes(t)) || s === "lower" || s === "upper";
-  const isScoreCol = s => ["nilai", "skor", "score", "poin", "points"].some(t => s.includes(t));
-  const isTimeCol = s => ["waktu selesai", "waktu", "finish time", "time finished", "selesai", "finish", "time"].some(t => s.includes(t));
-
-  const blocks = [];
-  let currentBlock = null;
-
-  for (let c = 0; c < headerRow.length; c++) {
-    const val = headerRow[c];
-    if (isClsCol(val)) {
-      if (currentBlock && currentBlock.nameCol !== -1) {
-        blocks.push(currentBlock);
-        currentBlock = null;
-      }
-      if (!currentBlock) currentBlock = { clsCol: c, nameCol: -1, scoreCol: -1, timeCol: -1, startCol: c };
-      else currentBlock.clsCol = c;
-    } else if (isNameCol(val)) {
-      if (currentBlock && currentBlock.nameCol !== -1) {
-        blocks.push(currentBlock);
-        currentBlock = null;
-      }
-      if (!currentBlock) currentBlock = { clsCol: -1, nameCol: c, scoreCol: -1, timeCol: -1, startCol: c };
-      else currentBlock.nameCol = c;
-    } else if (currentBlock) {
-      if (isScoreCol(val) && currentBlock.scoreCol === -1) {
-        currentBlock.scoreCol = c;
-      } else if (isTimeCol(val) && currentBlock.timeCol === -1) {
-        currentBlock.timeCol = c;
-      }
+  let headerRowIdx = -1;
+  for(let r = 0; r < Math.min(5, m.length); r++){
+    const row = m[r].map(norm);
+    if(row.some(c => c.includes("nama") || c.includes("tim"))){
+      headerRowIdx = r;
+      break;
     }
   }
-  if (currentBlock && currentBlock.nameCol !== -1) {
-    blocks.push(currentBlock);
-  }
+  if(headerRowIdx === -1) headerRowIdx = 0;
 
-  if (blocks.length < 2 && headerRow.length >= 6 && (!blocks[0] || blocks[0].clsCol === -1)) {
-    const rightStart = headerRow.length >= 7 && (headerRow[3] === "" || isNaN(Number(m[headerRowIdx + 1]?.[3]))) ? 4 : 3;
-    blocks.length = 0;
-    blocks.push({ clsCol: -1, nameCol: 0, scoreCol: 1, timeCol: 2, startCol: 0 });
-    blocks.push({ clsCol: -1, nameCol: rightStart, scoreCol: rightStart + 1, timeCol: rightStart + 2, startCol: rightStart });
-  }
+  const header = m[headerRowIdx].map(norm);
+  let nameCol = findCol(header, ["nama tim", "nama", "tim", "team"]);
+  let scoreCol = findCol(header, ["total point", "total poin", "total", "skor total", "point", "poin", "nilai", "skor"]);
+  let timeCol = findCol(header, ["sisa waktu", "sisa", "waktu", "time"]);
 
-  if (blocks.length === 0) {
-    throw Error("Header wajib: Kelas / Nama Tim, Nilai, Waktu Selesai.");
-  }
-
-  blocks.forEach((blk, idx) => {
-    let clsName = "";
-    if (headerRowIdx === 1) {
-      const superVal = norm(m[0][blk.nameCol >= 0 ? blk.nameCol : blk.startCol] || "");
-      if (superVal.includes("upper")) clsName = "upper";
-      else if (superVal.includes("lower")) clsName = "lower";
-    }
-    const headVal = norm((blk.nameCol >= 0 ? headerRow[blk.nameCol] : "") || "");
-    if (!clsName) {
-      if (headVal.includes("upper")) clsName = "upper";
-      else if (headVal.includes("lower")) clsName = "lower";
-    }
-    if (!clsName) {
-      clsName = idx === 0 ? "lower" : (idx === 1 ? "upper" : "class-" + (idx + 1));
-    }
-    blk.cls = clsName;
-  });
+  // Fallbacks: Col B (1) = Nama TIM, Col G (6) = Total Point, Col I (8) = Sisa Waktu
+  if(nameCol === -1) nameCol = 1;
+  if(scoreCol === -1) scoreCol = 6;
+  if(timeCol === -1) timeCol = 8;
 
   const results = [];
-  const dataRows = m.slice(headerRowIdx + 1);
-  const nameOccurrences = new Map();
+  const rows = m.slice(headerRowIdx + 1);
 
-  dataRows.forEach((r, rowIdx) => {
-    blocks.forEach(blk => {
-      const name = blk.nameCol >= 0 ? (r[blk.nameCol] || "").trim() : "";
-      const scoreRaw = blk.scoreCol >= 0 ? (r[blk.scoreCol] || "") : "";
-      const timeRaw = blk.timeCol >= 0 ? (r[blk.timeCol] || "").trim() : "";
-      if (!name) return;
+  rows.forEach((r, idx) => {
+    const name = (r[nameCol] || "").trim();
+    if(!name || norm(name) === "nama tim") return;
 
-      const score = Number(String(scoreRaw || "0").trim().replace(/\s/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
-      if (!Number.isFinite(score)) return;
+    const scoreRaw = (r[scoreCol] || "0").trim().replace(/\s/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
+    const score = Number(scoreRaw) || 0;
+    const timeRaw = (r[timeCol] || "").trim();
+    const timeSec = parseTimeToSeconds(timeRaw);
 
-      let cls = (blk.clsCol >= 0 ? (r[blk.clsCol] || "").trim() : "") || blk.cls;
-      if (!cls) cls = blk.cls;
-
-      const occKey = cls.toLowerCase() + "::" + name.toLowerCase();
-      const count = (nameOccurrences.get(occKey) || 0) + 1;
-      nameOccurrences.set(occKey, count);
-      const uniqueKey = `${occKey}::${count}`;
-
-      results.push({
-        cls: cls,
-        name: name,
-        score: score,
-        time: timeRaw,
-        timeSec: parseTimeToSeconds(timeRaw),
-        key: uniqueKey
-      });
+    results.push({
+      cls: clsKey,
+      name: name,
+      score: score,
+      time: timeRaw || "00:00",
+      timeSec: timeSec,
+      key: clsKey + "::" + name.toLowerCase() + "::" + (idx + 1)
     });
   });
 
-  if (results.length > 0) return results;
-  throw Error("Format spreadsheet tidak dikenali atau belum ada data tim.");
+  return results;
 }
 
 const groupCards = new Map();
 const scrollControllers = new Map();
+
+// Kontrol On/Off Auto Scroll (Sesi Juara / Umum)
+let isAutoScrollEnabled = true;
+
+const scrollParam = new URLSearchParams(window.location.search).get("scroll");
+if (scrollParam === "0" || scrollParam === "off" || scrollParam === "false") {
+  isAutoScrollEnabled = false;
+}
+
+function updateScrollToggleUI() {
+  const btn = document.getElementById("scrollToggle");
+  const txt = document.getElementById("scrollToggleText");
+  if (!btn) return;
+  if (isAutoScrollEnabled) {
+    btn.classList.remove("paused");
+    btn.title = "Auto-Scroll AKTIF. Klik atau tekan 'S' untuk menjeda di posisi juara.";
+    if (txt) txt.textContent = "SCROLL: ON";
+  } else {
+    btn.classList.add("paused");
+    btn.title = "Auto-Scroll JEDA (Posisi Juara). Klik atau tekan 'S' untuk melanjutkan.";
+    if (txt) txt.textContent = "SCROLL: OFF (JUARA)";
+  }
+}
+
+function setAutoScroll(enabled) {
+  isAutoScrollEnabled = enabled;
+  updateScrollToggleUI();
+
+  scrollControllers.forEach((state, wrap) => {
+    state.isPaused = !isAutoScrollEnabled;
+    if (!isAutoScrollEnabled) {
+      state.currentScroll = 0;
+      wrap.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      state.lastTime = performance.now();
+    }
+  });
+}
 
 function ensureAutoScroll(wrap){
   if (scrollControllers.has(wrap)) return;
 
   const state = {
     direction: 1, // 1 = turun, -1 = naik
-    isPaused: false,
+    isPaused: !isAutoScrollEnabled,
     animId: null,
     pauseTimeout: null,
     lastTime: performance.now(),
-    speed: 24 // Kecepatan pelan dan stabil (pixel/detik)
+    currentScroll: wrap.scrollTop || 0,
+    speed: 32 // Kecepatan pelan, halus dan stabil (pixel/detik)
   };
 
   function step(now){
@@ -591,56 +630,60 @@ function ensureAutoScroll(wrap){
     const dt = Math.min((now - state.lastTime) / 1000, 0.1);
     state.lastTime = now;
 
-    const maxScroll = wrap.scrollHeight - wrap.clientHeight;
+    const maxScroll = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
 
-    if (maxScroll <= 2 || state.isPaused) {
+    if (maxScroll <= 4 || state.isPaused || !isAutoScrollEnabled) {
       state.animId = requestAnimationFrame(step);
       return;
     }
 
     if (state.direction === 1) {
-      // Scroll pelan ke bawah
-      wrap.scrollTop += state.speed * dt;
-      if (wrap.scrollTop >= maxScroll - 1) {
+      // Scroll pelan ke bawah dengan accumulator presisi sub-pixel
+      state.currentScroll += state.speed * dt;
+      if (state.currentScroll >= maxScroll) {
+        state.currentScroll = maxScroll;
         wrap.scrollTop = maxScroll;
         state.direction = -1;
         state.isPaused = true;
-        // Mentok di bawah: jeda 3.5 detik
+        // Mentok di bawah: jeda 2.5 detik
         state.pauseTimeout = setTimeout(() => {
           state.isPaused = false;
           state.lastTime = performance.now();
-        }, 3500);
+        }, 2500);
+      } else {
+        wrap.scrollTop = Math.round(state.currentScroll);
       }
     } else {
       // Scroll pelan ke atas
-      wrap.scrollTop -= state.speed * dt;
-      if (wrap.scrollTop <= 1) {
+      state.currentScroll -= state.speed * dt;
+      if (state.currentScroll <= 0) {
+        state.currentScroll = 0;
         wrap.scrollTop = 0;
         state.direction = 1;
         state.isPaused = true;
-        // Mentok di atas: jeda 4 detik untuk melihat peringkat 1-5
+        // Mentok di atas: jeda 3 detik
         state.pauseTimeout = setTimeout(() => {
           state.isPaused = false;
           state.lastTime = performance.now();
-        }, 4000);
+        }, 3000);
+      } else {
+        wrap.scrollTop = Math.round(state.currentScroll);
       }
     }
 
     state.animId = requestAnimationFrame(step);
   }
 
-  // Jeda awal di atas sebelum mulai scroll
-  state.isPaused = true;
-  state.pauseTimeout = setTimeout(() => {
-    state.isPaused = false;
-    state.lastTime = performance.now();
-  }, 3500);
-
-  wrap.addEventListener("mouseenter", () => { state.isPaused = true; });
-  wrap.addEventListener("mouseleave", () => {
-    state.isPaused = false;
-    state.lastTime = performance.now();
-  });
+  // Jeda awal 2 detik di posisi atas sebelum mulai bergulir ke bawah jika auto scroll aktif
+  if (isAutoScrollEnabled) {
+    state.isPaused = true;
+    state.pauseTimeout = setTimeout(() => {
+      if (isAutoScrollEnabled) {
+        state.isPaused = false;
+        state.lastTime = performance.now();
+      }
+    }, 2000);
+  }
 
   state.animId = requestAnimationFrame(step);
   scrollControllers.set(wrap, state);
@@ -683,7 +726,7 @@ function render(data){
       sec.appendChild(sub);
       const colHead = document.createElement("div");
       colHead.className = "cols";
-      colHead.innerHTML = "<span>RANK</span><span>NAMA TIM</span><span>NILAI</span><span>WAKTU SELESAI</span>";
+      colHead.innerHTML = "<span>RANK</span><span>NAMA TIM</span><span>TOTAL POINT</span><span>SISA WAKTU</span>";
       sec.appendChild(colHead);
       const wrap = document.createElement("div");
       wrap.className = "entries-wrap";
@@ -712,12 +755,18 @@ function render(data){
     const emptyMsg = wrap.querySelector(".empty");
     if (emptyMsg) emptyMsg.remove();
 
-    // Jika lebih dari 5 tim, aktifkan scroll
+    // Jika lebih dari 5 tim, aktifkan scroll otomatis
     if (g.items.length > 5) {
       wrap.classList.add("scrollable");
       ensureAutoScroll(wrap);
     } else {
       wrap.classList.remove("scrollable");
+      const ctrl = scrollControllers.get(wrap);
+      if (ctrl) {
+        if (ctrl.animId) cancelAnimationFrame(ctrl.animId);
+        if (ctrl.pauseTimeout) clearTimeout(ctrl.pauseTimeout);
+        scrollControllers.delete(wrap);
+      }
       wrap.scrollTop = 0;
     }
 
@@ -811,37 +860,55 @@ function render(data){
 
   lastSignature = signature;
 }
-function resolveCsvUrl(rawUrl){
-  let u = (rawUrl || "").trim();
-  if(!u.startsWith("https://")) return u;
-  if(u.includes("/gviz/tq") || u.includes("/pub?") || u.includes("/export?")) return u;
-  const docMatch = u.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if(docMatch && !u.includes("/d/e/2PACX-")){
-    const sheetId = docMatch[1];
-    const gidMatch = u.match(/[#&?]gid=([0-9]+)/);
-    const gid = gidMatch ? gidMatch[1] : "0";
-    return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
-  }
-  return u;
+
+function getSheetCsvUrl(sheetName) {
+  const enc = encodeURIComponent(sheetName);
+  return `${SHEET_BASE_URL}/gviz/tq?tqx=out:csv&sheet=${enc}`;
 }
+
+async function fetchSheetCsv(sheetName) {
+  const u = getSheetCsvUrl(sheetName) + "&t=" + Date.now();
+  const res = await fetch(u, { cache: "no-store" });
+  if (!res.ok) throw Error(`HTTP ${res.status} pada tab '${sheetName}'`);
+  return await res.text();
+}
+
 async function refresh(){
-  const targetUrl = resolveCsvUrl(SHEET_CSV_URL);
-  if(!targetUrl.startsWith("https://")){statusEl.textContent="SET URL GOOGLE SHEETS";statusEl.classList.add("error");return}
-  try{
-    const u=targetUrl+(targetUrl.includes("?")?"&":"?")+"t="+Date.now(),r=await fetch(u,{cache:"no-store"});
-    if(!r.ok)throw Error("HTTP "+r.status);
-    const d=parseData(await r.text());
-    if(!d.length)throw Error("Belum ada data tim.");
-    render(d);
-    statusEl.textContent="TERHUBUNG • "+d.length+" TIM";
+  try {
+    const [lowerCsv, upperCsv] = await Promise.all([
+      fetchSheetCsv(SHEET_LOWER_NAME),
+      fetchSheetCsv(SHEET_UPPER_NAME)
+    ]);
+    const lowerData = parseSheetData(lowerCsv, "lower");
+    const upperData = parseSheetData(upperCsv, "upper");
+    const combined = [...lowerData, ...upperData];
+    if (!combined.length) throw Error("Belum ada data tim di spreadsheet.");
+    render(combined);
+    statusEl.textContent = `TERHUBUNG • ${lowerData.length} LOWER / ${upperData.length} UPPER`;
     statusEl.classList.remove("error");
-    updatedEl.textContent="DIPERBARUI "+new Date().toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
-  }catch(e){
-    statusEl.textContent="GAGAL MEMBACA DATA";
+    updatedEl.textContent = "DIPERBARUI " + new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch(e) {
+    statusEl.textContent = "GAGAL MEMBACA DATA";
     statusEl.classList.add("error");
-    updatedEl.textContent=e.message.slice(0,45);
+    updatedEl.textContent = e.message.slice(0, 45);
     console.error(e);
   }
 }
 refresh();setInterval(refresh,REFRESH_MS);
+
+// Tombol dan shortcut keyboard untuk ON/OFF Auto Scroll (Sesi Juara)
+const scrollBtn = document.getElementById("scrollToggle");
+if (scrollBtn) {
+  scrollBtn.addEventListener("click", () => setAutoScroll(!isAutoScrollEnabled));
+}
+updateScrollToggleUI();
+
+window.addEventListener("keydown", (ev) => {
+  if (ev.key.toLowerCase() === "s" || ev.code === "Space") {
+    if (ev.target.tagName !== "INPUT" && ev.target.tagName !== "TEXTAREA") {
+      ev.preventDefault();
+      setAutoScroll(!isAutoScrollEnabled);
+    }
+  }
+});
 </script></body></html>
